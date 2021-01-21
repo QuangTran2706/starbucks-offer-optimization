@@ -192,6 +192,18 @@ def predict(model_name):
     result = get_predict_result(X_test, model)
     return jsonify({"predict_result": list(result)})
 
+
+@server.route('/api/predict_offer_effective', methods=['POST'])
+def predict_offer_effective():
+    json_data = request.get_json()
+    cust_id = json_data["customer_id"]
+    offer_id = json_data["offer_id"]
+    time = json_data["time"]
+    amount_reward = json_data["amount_reward"]
+
+    result = predict_offer_success(cust_id, offer_id, best_model, time, amount_reward)
+    return jsonify({"success": result})
+
 # Run the app
 if __name__ == '__main__':
     create_app()
