@@ -6,10 +6,12 @@ import dash_html_components as html
 import dash_core_components as dcc
 import plotly.express as px
 from plotly.subplots import make_subplots
-from dash.dependencies import Input, Output
+from dash.dependencies import Input, Output, State
 import plotly.graph_objects as go
 from helper.helper import *
 import pickle
+import ast
+
 
 server = Flask(__name__)
 app = dash.Dash(__name__, server=server, url_base_pathname='/dashboard/')
@@ -19,11 +21,19 @@ with open("model/lgbmClf_model.pkl", 'rb') as file:
     best_model = pickle.load(file)
 
 def create_app():
+    global models_list
+    models_list = loadModels()
     corr_fig = get_corr_fig(df)
-    # scatter_fig = get_scatter_figure(df)
-    roc_curves_fig = get_roc_figure()
     model_score_fig = get_model_score_figure()
-    column_list = [i for i in list(df) if i not in ('customer_id', 'offer id')]
+    x_list = [{'label': 'offer channel', 'value': ['channel_email', 'channel_mobile', 'channel_social', 'channel_web']},
+            {'label': 'offer type', 'value': ['offer_type_bogo', 'offer_type_discount', 'offer_type_informational']},
+            {'label': 'offer event ', 'value': ['event_offer completed', 'event_offer received', 'event_offer viewed']}]
+    group_by_list = ['time', 'amount', 'amount_rewarded',
+            'difficulty', 'duration', 'income', 'age',
+            'membership_duration', 'gender_F', 'gender_M', 'gender_O']
+    x_options = [{"label": i['label'], "value": str(i['value'])} for i in x_list]
+    y_options = [{"label": i, "value": i} for i in group_by_list]
+    model_options = [{"label": i['name'], "value": n} for n, i in enumerate(models_list)]
     app.layout = html.Div(
         children=[
             html.Div(
@@ -38,26 +48,37 @@ def create_app():
                     html.Div(className='div-plot-1-control',
                         children=[html.P('''1. Correlation Matrix Graph.''')]),
                     html.Div(className='div-plot-2-control',
-                        children=[html.P('''2. Scatter Graph.'''),
+                        children=[html.P('''2. Line Chart.'''),
                         html.Div(className='div-for-dropdown',
                             children=
                             [
                                 dcc.Dropdown(id='selector_x',
-                                options=[{"label": i, "value": i} for i in column_list],
+                                options=x_options,
+                                value=x_options[0]['value'],
                                 multi=False,
                                 placeholder="Select x column",)
-                            ]),      
+                            ]),
                         html.Div(className='div-for-dropdown',
                             children=
                             [
                                 dcc.Dropdown(id='selector_y',
-                                options=[{"label": i, "value": i} for i in column_list],
+                                options=y_options,
+                                value=y_options[0]['value'],
                                 multi=False,
                                 placeholder="Select y column",)
                             ]),                   
                         ]),
                     html.Div(className='div-plot-2-control',
-                        children=[html.P('''3. ROC Curves Graph.''')]),
+                        children=[html.P('''3. ROC Curves Graph.'''),
+                        html.Div(className='div-for-dropdown',
+                            children=
+                            [
+                                dcc.Dropdown(id='selector_model',
+                                options=model_options,
+                                value=0,
+                                multi=False,
+                                placeholder="Select x column",)
+                            ]),]),
                     html.Div(className='div-plot-2-control',
                         children=[html.P('''4. Model Score Comparasion Graph.''')]),
                 ]),
@@ -66,7 +87,7 @@ def create_app():
                 children = [
                     dcc.Graph(id='heatmap_graph', figure=corr_fig),
                     dcc.Graph(id='scatter_graph'),
-                    dcc.Graph(id="roc_train_graph", figure=roc_curves_fig),
+                    dcc.Graph(id="roc_curve_graph"),
                     dcc.Graph(id='model_score_graph', figure= model_score_fig)
                     ]),
             ])
@@ -81,19 +102,10 @@ def get_corr_fig(df):
             'template': 'plotly_dark',
             })
     return fig
-def get_scatter_figure(df):
-    fig = px.scatter(df, x = 'income', y = 'difficulty', color='offer_succeed')
-    fig.update_layout({
-            'plot_bgcolor': 'rgba(0, 0, 0, 0)',
-            'paper_bgcolor':'rgba(0, 0, 0, 0)',
-            'title': {'text': '2. Scatter Plot base on offer_succeed', 'font': {'color': 'white', 'size': 18}, 'x': 0.5},
-            'template': 'plotly_dark',
-            })
-    return fig
 
 def get_model_score_figure():
-    models = loadModels()
-    model_scores = getModelScore(models, X_test, y_test)
+    global models_list
+    model_scores = getModelScore(models_list, X_test, y_test)
     model_score_df = pd.DataFrame(model_scores, columns =['model', 'accuracy', 'f1'])
     fig = go.Figure()
     fig.add_trace(go.Bar(
@@ -112,15 +124,35 @@ def get_model_score_figure():
             })
     return fig
 
-def get_roc_figure():
-    y_test_pred_proba = best_model.predict_proba(X_test)[::,1]
-    y_train_pred_proba = best_model.predict_proba(X_train)[::,1]
+# Callback for interactive scatterplot
+@app.callback(Output('scatter_graph', 'figure'),
+              [Input('selector_x', 'value'), Input('selector_y', 'value')],
+              [State("selector_x","options")])    
+def update_scatterplot(selector_x, selector_y, opt):
+    x_label = [x['label'] for x in opt if x['value'] == selector_x][0]
+    selector_x = ast.literal_eval(selector_x)
+    x= cleanData_df.groupby(selector_y)[selector_x].sum()
+    fig=px.line(x)
+    fig.update_layout({
+            'plot_bgcolor': 'rgba(0, 0, 0, 0)',
+            'paper_bgcolor':'rgba(0, 0, 0, 0)',
+            'title': {'text': f'2. Line chart of {x_label} by {selector_y}', 'font': {'color': 'white', 'size': 18}, 'x': 0.5},
+            'template': 'plotly_dark',
+            })
+    return fig
 
-    fpr_train, tpr_train, _, auc_train, best_fpr_train, best_tpr_train = get_roc_curve(y_train, y_train_pred_proba)
-    fpr_test, tpr_test, _, auc_test, best_fpr_test, best_tpr_test = get_roc_curve(y_test, y_test_pred_proba)
+@app.callback(Output('roc_curve_graph', 'figure'),
+              [Input('selector_model', 'value')],
+              [State("selector_model","options")])   
+def update_roc_curve(selector_model, opt):
+    global models_list
+    model_label = [x['label'] for x in opt if x['value'] == selector_model][0]
+    model = models_list[selector_model]['model']
+    fpr_train, tpr_train, _, auc_train, best_fpr_train, best_tpr_train = get_roc_curve(model, X_train, y_train)
+    fpr_test, tpr_test, _, auc_test, best_fpr_test, best_tpr_test = get_roc_curve(model, X_test, y_test)
 
     fig = make_subplots(rows=1, cols=2,
-        subplot_titles=('ROC Curve Train'))
+        subplot_titles=(f'ROC Curve Train (AUC={auc_train:.4f})', f'ROC Curve Train (AUC={auc_test:.4f})'))
 
     fig.add_trace(
         go.Scatter(x=fpr_train, y=tpr_train, name='train_roc_curve'),
@@ -158,22 +190,10 @@ def get_roc_figure():
     fig.update_layout({
                     'plot_bgcolor': 'rgba(0, 0, 0, 0)',
                     'paper_bgcolor':'rgba(0, 0, 0, 0)',
-                    'title': {'text': '3. ROC Curves Graph', 'font': {'color': 'white', 'size': 18}, 'x': 0.5},
+                    'title': {'text': f'3. ROC Curve and AUC of {model_label}', 'font': {'color': 'white', 'size': 18}, 'x': 0.5},
                     'template': 'plotly_dark',
                     })
-    return fig
-# Callback for interactive scatterplot
-@app.callback(Output('scatter_graph', 'figure'),
-              [Input('selector_x', 'value'), Input('selector_y', 'value')])    
-def update_scatterplot(selector_x, selector_y):
-    fig = px.scatter(df, x=selector_x, y=selector_y, color='offer_succeed')
-    fig.update_layout({
-            'plot_bgcolor': 'rgba(0, 0, 0, 0)',
-            'paper_bgcolor':'rgba(0, 0, 0, 0)',
-            'title': {'text': '2. Scatter Plot base on offer_succeed', 'font': {'color': 'white', 'size': 18}, 'x': 0.5},
-            'template': 'plotly_dark',
-            })
-    return fig    
+    return fig 
 
 # Route API
 @server.route('/')

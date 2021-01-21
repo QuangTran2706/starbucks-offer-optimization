@@ -3,9 +3,11 @@ from sklearn.metrics import f1_score, accuracy_score, classification_report, roc
 import pickle
 import pandas as pd
 import numpy as np
+import os
 
 best_model = None
 df = pd.read_csv("./data/new_data.csv", sep=',', decimal='.')
+cleanData_df = pd.read_csv("./data/cleanData.csv", sep=',', decimal='.', low_memory=False)
 portfolio = pd.read_csv("./data/portfolio_new.csv", sep=',', decimal='.')
 
 def getData(dataFrame):
@@ -31,18 +33,6 @@ def loadModels():
         with open(i, 'rb') as file:
             models[n]['model'] = pickle.load(file)
     return models
-
-def loadModels():
-    adaClf_filename = "model/adaClf_model.pkl"
-    logRegression_filename = "model/logRegression_model.pkl"
-    lgbmClassifier = "model/lgbmClf_model.pkl"
-    list_models_name = [adaClf_filename, logRegression_filename, lgbmClassifier]
-    models = [{'name' : 'AdaBoostClassifier'}, {'name' : 'LogisticRegression'}, {'name' : 'LGBMClassifier'}]
-    for n, i in enumerate(list_models_name):
-        with open(i, 'rb') as file:
-            models[n]['model'] = pickle.load(file)
-    return models
-
     
 def loadModel(model_name):
     if model_name == 'adaClf':
@@ -113,7 +103,8 @@ def get_predict_result(x_test, model):
     y_pred = model.predict(x_test)
     return y_pred
 
-def get_roc_curve(y_true, y_prob):
+def get_roc_curve(model, x, y_true):
+    y_prob = model.predict_proba(x)[::,1]
     fpr, tpr, thresholds = roc_curve(y_true, y_prob, pos_label =True)
     sum_ss = tpr + (1-fpr) # sum of sum_sensitivity and specificity
     best_threshold_id = np.argmax(sum_ss)
